@@ -1,111 +1,136 @@
 # 🧱 Deep Agents from Scratch
 
-<img width="720" height="289" alt="Screenshot 2025-08-12 at 2 13 54 PM" src="https://github.com/user-attachments/assets/90e5a7a3-7e88-4cbe-98f6-5b2581c94036" />
+A comprehensive Python framework demonstrating advanced context engineering patterns in modern autonomous agents using [LangGraph](https://github.com/langchain-ai/langgraph).
 
-[Deep Research](https://academy.langchain.com/courses/deep-research-with-langgraph) broke out as one of the first major agent use-cases along with coding. Now, we've seeing an emergence of general purpose agents that can be used for a wide range of tasks. For example, [Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) has gained significant attention and popularity for long-horizon tasks; the average Manus task uses ~50 tool calls!. As a second example, Claude Code is being used generally for tasks beyond coding. Careful review of the [context engineering patterns](https://docs.google.com/presentation/d/16aaXLu40GugY-kOpqDU4e-S0hD1FmHcNyF0rRRnb1OU/edit?slide=id.p#slide=id.p) across these popular "deep" agents shows some common approaches:
+Rather than relying on simple, single-prompt loops, this project implements the three core architectural patterns found in state-of-the-art agent systems (like Manus and Claude Code) to handle long-horizon tasks:
+1. **Task Planning (TODO Lists)**: Recitation and tracking to prevent task-drift.
+2. **Virtual File Systems (VFS)**: Context offloading to state-persisted files to prevent token overflow.
+3. **Sub-agent Delegation (Context Isolation)**: Running specialized sub-agents with clean, isolated context windows to prevent prompt and history contamination.
 
-* **Task planning (e.g., TODO), often with recitation**
-* **Context offloading to file systems**
-* **Context isolation through sub-agent delegation**
+---
 
-This course will show how to implement these patterns from scratch using LangGraph! 
+## 🛠️ Key Architectural Patterns
 
-## 🚀 Quickstart 
+### 1. Task Planning via TODO Lists
+Long-horizon execution is highly susceptible to "agent drift," where the LLM forgets its original goal after multiple tool calls. 
+* **Implementation**: Managed via `DeepAgentState.todos`.
+* **Workflow**: The agent builds a structured TODO list at the beginning of a query using the `write_todos` tool, checks its progress using `read_todos`, and updates task statuses (`pending` ➡️ `in_progress` ➡️ `completed`) dynamically.
+* **Reference**: [src/deep_agents_from_scratch/todo_tools.py](file:///d:/AI%20Engineering%20LAB/Deepagent/src/deep_agents_from_scratch/todo_tools.py)
+
+### 2. Virtual File System (VFS)
+Storing large amounts of web-search outputs directly in the LLM conversation history quickly pollutes the context window and drives up token costs.
+* **Implementation**: The agent state maintains a virtual file system (`DeepAgentState.files`) mapped to ephemeral key-value contents.
+* **Workflow**:
+  - `ls()`: List existing files in state.
+  - `read_file()`: Read file contents with support for line offset and limit pagination (to prevent context overflow).
+  - `write_file()`: Create or overwrite files.
+* **Reference**: [src/deep_agents_from_scratch/file_tools.py](file:///d:/AI%20Engineering%20LAB/Deepagent/src/deep_agents_from_scratch/file_tools.py)
+
+### 3. Sub-agent Delegation with Context Isolation
+When solving complex multi-faceted queries, letting a single agent manage everything leads to context clash.
+* **Implementation**: The framework spawns specialized sub-agents (e.g., `research-agent`) with limited tools.
+* **Workflow**: The parent agent delegates a specific subtask using the `task` tool. The sub-agent runs in an isolated LangGraph sequence, with its message history completely quarantined. Once completed, only the final answer and any modified virtual files are merged back into the parent state.
+* **Reference**: [src/deep_agents_from_scratch/task_tool.py](file:///d:/AI%20Engineering%20LAB/Deepagent/src/deep_agents_from_scratch/task_tool.py)
+
+---
+
+## 📂 Project Structure
+
+```
+.
+├── main.py                     # Entry point wrapper for CLI execution
+├── pyproject.toml              # Project dependencies, build setup, and linter rules
+├── uv.lock                     # Lockfile guaranteeing reproducible environment states
+├── src/
+│   └── deep_agents_from_scratch/
+│       ├── __init__.py         # Package entry point
+│       ├── cli.py              # CLI runner, prompt composition, and interactive chat loop
+│       ├── state.py            # LangGraph schemas (DeepAgentState, Todo) and state reducers
+│       ├── file_tools.py       # Virtual file system tools (ls, read_file, write_file)
+│       ├── todo_tools.py       # Task planning tools (write_todos, read_todos)
+│       ├── task_tool.py        # Sub-agent creation, registry, and isolation (task tool)
+│       ├── research_tools.py   # Web search wrapper and AI page summarization
+│       ├── prompts.py          # Detailed system prompts and guidelines
+│       └── utils.py            # CLI output formatters and agent streaming logic
+└── experiment/                 # Research notebooks exploring agent progression
+```
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-
-- Ensure you're using Python 3.11 or later.
-- This version is required for optimal compatibility with LangGraph.
-```bash
-python3 --version
-```
-- [uv](https://docs.astral.sh/uv/) package manager
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# Update PATH to use the new uv version
-export PATH="/Users/$USER/.local/bin:$PATH"
-```
+* **Python**: `^3.11` (Requires Python >= 3.11, < 3.14)
+* **Package Manager**: [uv](https://docs.astral.sh/uv/) (recommended for speed and reliability)
 
 ### Installation
-
-1. Clone the repository:
+Clone the repository and install the package dependencies:
 ```bash
-git clone https://github.com/langchain-ai/deep-agents-from-scratch.git
-cd deep-agents-from-scratch
-```
+# Clone the repository
+git clone https://github.com/rderakhshan/Alijna.git
+cd Alijna
 
-2. Install the package and dependencies (this automatically creates and manages the virtual environment):
-```bash
+# Install dependencies and sync virtual environment
 uv sync
 ```
 
-3. Create a `.env` file in the project root with your API keys:
-```bash
-# Create .env file
-touch .env
-```
-
-Add your API keys to the `.env` file:
-```env
-# Required for research agents with external search
+### Environment Configuration
+Create a `.env` file in the root of the project to define the API keys for the language model provider and external search APIs:
+```ini
+# Required for research tools
 TAVILY_API_KEY=your_tavily_api_key_here
 
-# Required for model usage
+# LLM Providers (Provide at least one)
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
-# Optional: For evaluation and tracing
+# Optional: LangSmith Tracing & Observability
 LANGSMITH_API_KEY=your_langsmith_api_key_here
 LANGSMITH_TRACING=true
 LANGSMITH_PROJECT=deep-agents-from-scratch
 ```
 
-4. Run notebooks or code using uv:
-```bash
-# Run Jupyter notebooks directly
-uv run jupyter notebook
+---
 
-# Or activate the virtual environment if preferred
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-jupyter notebook
+## 💻 Running the Application
+
+To run the interactive CLI interface and chat with the Deep Agent, execute:
+```bash
+uv run python main.py
 ```
 
-## 📚 Tutorial Overview
+### Model Selection Order
+The runner dynamically binds your LLM client on startup according to the keys present in `.env`:
+1. **DeepSeek** (`deepseek-chat` via OpenAI-compatible endpoints) - *First priority if key is set*
+2. **OpenAI** (`gpt-4o`) - *Second priority*
+3. **Anthropic** (`claude-3-5-sonnet-latest`) - *Third priority*
+4. **Fallback** (`gpt-4o-mini` using default system client)
 
-This repository contains five progressive notebooks that teach you to build advanced AI agents:
+---
 
-### `0_create_agent.ipynb` -
-Learn how to use the create_agent component. This component,
-- implements a ReAct (Reason - Act) loop that forms the foundation for many agents.
-- is easy to use and quick to set up.
-- serves as the basis for the following lessons.
+## ⚙️ Development & Code Quality
 
-### `1_todo.ipynb` - Task Planning Foundations
-Learn to implement structured task planning using TODO lists. This notebook introduces:
-- Task tracking with status management (pending/in_progress/completed)  
-- Progress monitoring and context management
-- The `write_todos()` tool for organizing complex multi-step workflows
-- Best practices for maintaining focus and preventing task drift
+Maintain codebase standards using the preconfigured linting and formatting tooling:
 
-### `2_files.ipynb` - Virtual File Systems
-Implement a virtual file system stored in agent state for context offloading:
-- File operations: `ls()`, `read_file()`, `write_file()`, `edit_file()`
-- Context management through information persistence
-- Enabling agent "memory" across conversation turns
-- Reducing token usage by storing detailed information in files
+### Formatting & Linting (Ruff)
+Verify code quality and automatically fix format issues:
+```bash
+# Sync development tools
+uv sync --extra dev
 
-### `3_subagents.ipynb` - Context Isolation
-Master sub-agent delegation for handling complex workflows:
-- Creating specialized sub-agents with focused tool sets
-- Context isolation to prevent confusion and task interference
-- The `task()` delegation tool and agent registry patterns
-- Parallel execution capabilities for independent research streams
+# Run ruff checks
+uv run ruff check
 
-### `4_full_agent.ipynb` - Complete Research Agent
-Combine all techniques into a production-ready research agent:
-- Integration of TODOs, files, and sub-agents
-- Real web search with intelligent context offloading
-- Content summarization and strategic thinking tools
-- Complete workflow for complex research tasks with LangGraph Studio integration
+# Auto-fix linting issues
+uv run ruff check --fix
 
-Each notebook builds on the previous concepts, culminating in a sophisticated agent architecture capable of handling real-world research and analysis tasks. 
-# Alijna
+# Format code layout
+uv run ruff format
+```
+
+### Type Checking (Mypy)
+Check type hints across source code:
+```bash
+uv run mypy src/
+```
