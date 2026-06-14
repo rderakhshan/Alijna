@@ -783,6 +783,10 @@ class AutoEvolver:
             return 0.0
         return 1.0 if all(run_successes[:k]) else 0.0
 
+    def _calculate_perturbation_sensitivity(self, sr_clean: float, sr_perturbed: float) -> float:
+        """Calculate perturbation sensitivity (SR_clean - SR_perturbed)."""
+        return max(0.0, sr_clean - sr_perturbed)
+
     def _select_top(self, eval_results: Dict[str, Any], k: int) -> List[str]:
         """
         Select top k memory systems.

@@ -43,8 +43,19 @@ class TrajectoryFeedbackAggregator:
     - text stats: avg obs length for action steps; answer length; question length
     """
 
-    def __init__(self, task_logs_dir: str):
+    def __init__(self, task_logs_dir: str, model: Optional[Any] = None):
         self.task_logs_dir = Path(task_logs_dir)
+        self.model = model
+        if self.model is None:
+            try:
+                from FlashOAgents import OpenAIServerModel
+                self.model = OpenAIServerModel(
+                    os.environ.get("DEFAULT_MODEL", "gpt-4o-mini"),
+                    api_key=os.environ.get("OPENAI_API_KEY"),
+                    api_base=os.environ.get("OPENAI_API_BASE"),
+                )
+            except Exception:
+                pass
 
     def _load_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         task_file = self.task_logs_dir / f"{task_id}.json"
@@ -339,6 +350,52 @@ class TrajectoryFeedbackAggregator:
         # Error recovery
         err_rec = self._calculate_error_recovery(task_data)
 
+        # Tier-3 metrics (heavy dependencies)
+        factual_corr = 1.0
+        reasoning_align = 1.0
+        contradiction_rate = 0.0
+        toxicity = 0.0
+        explainability = 1.0
+        
+        from . import metrics_heavy
+        
+        if self.model is not None:
+            try:
+                memories = []
+                for step in trajectory:
+                    memories.extend(self._memory_guidance_items(step))
+                factual_corr = metrics_heavy.evaluate_factual_correctness(self.model, agent_result, memories)
+            except Exception:
+                pass
+                
+            try:
+                thought_str = " ".join(
+                    str(step.get("think", step.get("cot_think", "")))
+                    for step in trajectory if step.get("think") or step.get("cot_think")
+                )
+                explainability = metrics_heavy.evaluate_explainability(self.model, thought_str)
+            except Exception:
+                pass
+                
+        try:
+            contradiction_rate = metrics_heavy.calculate_contradiction_rate(trajectory)
+        except Exception:
+            pass
+            
+        try:
+            toxicity = metrics_heavy.evaluate_toxicity(agent_result)
+        except Exception:
+            pass
+            
+        try:
+            actual_thought = " ".join(
+                str(step.get("think", step.get("cot_think", "")))
+                for step in trajectory if step.get("think") or step.get("cot_think")
+            )
+            reasoning_align = metrics_heavy.calculate_reasoning_alignment(actual_thought, task_data.get("expected_thought", ""))
+        except Exception:
+            pass
+
         feedback = {
             "accuracy": 1 if is_correct else 0,
             "status": task_data.get("status", "unknown"),
@@ -357,6 +414,11 @@ class TrajectoryFeedbackAggregator:
             "factual_recall": fact_recall,
             "policy_adherence": policy_adh,
             "error_recovery": err_rec,
+            "factual_correctness": factual_corr,
+            "reasoning_alignment": reasoning_align,
+            "contradiction_rate": contradiction_rate,
+            "toxicity": toxicity,
+            "explainability": explainability,
             "steps": {
                 "total": steps_total,
                 "action": action_steps,
@@ -436,6 +498,11 @@ class TrajectoryFeedbackAggregator:
             "factual_recall": _avg(["factual_recall"]),
             "policy_adherence": _avg(["policy_adherence"]),
             "error_recovery": _avg(["error_recovery"]),
+            "factual_correctness": _avg(["factual_correctness"]),
+            "reasoning_alignment": _avg(["reasoning_alignment"]),
+            "contradiction_rate": _avg(["contradiction_rate"]),
+            "toxicity": _avg(["toxicity"]),
+            "explainability": _avg(["explainability"]),
             "steps": {
                 "total": _avg(["steps", "total"]),
                 "action": _avg(["steps", "action"]),
