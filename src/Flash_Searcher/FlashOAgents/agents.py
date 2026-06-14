@@ -180,6 +180,7 @@ class MultiStepAgent:
             prompts_type: Optional[str] = "default",
     ):
         self.agent_name = self.__class__.__name__
+        self.context_token_history = []
         
         class ModelTelemetryWrapper:
             def __init__(self, model_obj, history_list):
@@ -192,7 +193,7 @@ class MultiStepAgent:
                 return res
             def __getattr__(self, name):
                 return getattr(self._model, name)
-                
+                 
         self.model = ModelTelemetryWrapper(model, self.context_token_history)
         self.prompt_templates = prompt_templates or EMPTY_PROMPT_TEMPLATES
         self.max_steps = max_steps
@@ -206,7 +207,6 @@ class MultiStepAgent:
         self.debug = debug
         self.action_trajectory = []
         self.managed_agents = {}
-        self.context_token_history = []
 
         for tool in tools:
             assert isinstance(tool, Tool), f"This element is not of class Tool: {str(tool)}"

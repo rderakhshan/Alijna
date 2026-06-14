@@ -52,8 +52,11 @@ def cmd_analyze(args):
         print(f"Report: {result['report_path']}")
         print(f"Statistics:")
         stats = result["stats"]
-        print(f"  Total tasks: {stats['total_tasks']}")
-        print(f"  Correct: {stats['correct_tasks']} ({stats['correct_tasks']/stats['total_tasks']*100:.1f}%)")
+        total = stats.get("total_tasks", 0)
+        correct = stats.get("correct_tasks", 0)
+        ratio = (correct / total * 100) if total > 0 else 0.0
+        print(f"  Total tasks: {total}")
+        print(f"  Correct: {correct} ({ratio:.1f}%)")
     else:
         print(f"\nAnalysis failed")
         sys.exit(1)
