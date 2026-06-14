@@ -266,6 +266,11 @@ class Model:
         self.total_output_tokens = 0
         self.kwargs = kwargs
 
+    @property
+    def last_total_tokens(self) -> int:
+        return (self.last_input_token_count or 0) + (self.last_output_token_count or 0)
+
+
     def reset_cumulative_tokens(self):
         self.total_input_tokens = 0
         self.total_output_tokens = 0

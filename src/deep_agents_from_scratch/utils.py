@@ -100,12 +100,20 @@ def show_prompt(prompt_text: str, title: str = "Prompt", border_style: str = "bl
 
 # more expressive runner
 async def stream_agent(agent, query, config=None):
+    import time
+    start_time = time.monotonic()
+    ttft = None
+    
+    current_state = None
     async for graph_name, stream_mode, event in agent.astream(
         query,
         stream_mode=["updates", "values"], 
         subgraphs=True,
         config=config
     ):
+        if ttft is None:
+            ttft = time.monotonic() - start_time
+            
         if stream_mode == "updates":
             print(f'Graph: {graph_name if len(graph_name) > 0 else "root"}')
             
@@ -121,4 +129,10 @@ async def stream_agent(agent, query, config=None):
         elif stream_mode == "values":
             current_state = event
 
+    if isinstance(current_state, dict):
+        if "metrics" not in current_state:
+            current_state["metrics"] = {}
+        current_state["metrics"]["ttft"] = ttft or 0.0
+
     return current_state
+
