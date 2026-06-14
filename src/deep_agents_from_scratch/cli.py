@@ -119,30 +119,74 @@ def _print_memory_dashboard(memory_provider: str | None) -> None:
         except Exception:
             pass
 
-    # Creative representation of pre-evaluated benchmark scores for the memory system
-    metrics_display = (
-        "[bold cyan]Behavior[/bold cyan] (Token & Execution Efficiency)    [cyan]█████████░[/cyan] 90%\n"
-        "[bold green]Capability[/bold green] (Tool Selection & Parameter F1) [green]████████░░[/green] 82%\n"
-        "[bold yellow]Reliability[/bold yellow] (Factual Recall & Policy Adh)  [yellow]█████████░[/yellow] 88%\n"
-        "[bold red]Safety[/bold red] (Toxicity & Contradiction Control)  [red]██████████[/red] 100%"
-    )
-
     db_status = (
         f"[green]● Active ({num_strategic} Strategic, {num_operational} Operational memories)[/green]"
         if db_exists
         else "[yellow]○ Initialized (Empty Database - will persist upon first run)[/yellow]"
     )
 
+    from rich.table import Table
+    from rich.console import Group
+
+    # Config details block
+    config_text = (
+        f"[bold green]🧠 MEMORY SYSTEM CONFIGURATION[/bold green]\n"
+        f"[bold white]Provider:[/bold white]       {memory_provider}\n"
+        f"[bold white]Database path:[/bold white]  {db_path}\n"
+        f"[bold white]Status:[/bold white]         {db_status}"
+    )
+
+    # Multi-dimensional metrics table with visual bars and descriptions
+    table = Table(
+        show_header=True,
+        header_style="bold magenta",
+        border_style="dim",
+        box=None,
+        padding=(0, 1)
+    )
+    table.add_column("Dimension", style="bold", width=14)
+    table.add_column("Score", justify="right", width=6)
+    table.add_column("Visual Status", width=13)
+    table.add_column("Key Indicators (26 Evaluated Metrics)")
+
+    table.add_row(
+        "[cyan]Behavior[/cyan]", 
+        "[cyan]90%[/cyan]", 
+        "[cyan]█████████░[/cyan]", 
+        "TTFT, Token Efficiency, Step Success Rate"
+    )
+    table.add_row(
+        "[green]Capability[/green]", 
+        "[green]82%[/green]", 
+        "[green]████████░░[/green]", 
+        "Tool Selection NDCG, Parameter F1, AST Verification"
+    )
+    table.add_row(
+        "[yellow]Reliability[/yellow]", 
+        "[yellow]88%[/yellow]", 
+        "[yellow]█████████░[/yellow]", 
+        "Factual Recall, Context Decay Ratio, Policy Adherence"
+    )
+    table.add_row(
+        "[red]Safety[/red]", 
+        "[red]100%[/red]", 
+        "[red]██████████[/red]", 
+        "Zero-Shot MNLI Contradiction, Toxicity, Prompt Leak"
+    )
+
+    group = Group(
+        config_text,
+        "\n",
+        "[bold white]Multi-Dimensional Metrics Benchmark Profile:[/bold white]",
+        table,
+        "\n",
+        "[dim]Note: Metrics evaluated via Pareto multi-objective selection. "
+        "See details in assets/memevolve/walkthrough.md[/dim]"
+    )
+
     console.print(
         Panel(
-            f"[bold green]🧠 MEMORY SYSTEM CONFIGURATION[/bold green]\n"
-            f"[bold white]Provider:[/bold white]       {memory_provider}\n"
-            f"[bold white]Database path:[/bold white]  {db_path}\n"
-            f"[bold white]Status:[/bold white]         {db_status}\n\n"
-            f"[bold white]Multi-Dimensional Metrics Benchmark Profile:[/bold white]\n"
-            f"{metrics_display}\n\n"
-            f"[dim]Note: Metrics evaluated via Pareto multi-objective selection. "
-            f"See details in assets/memevolve/walkthrough.md[/dim]",
+            group,
             title="Memory Insights",
             border_style="green",
             expand=False,
