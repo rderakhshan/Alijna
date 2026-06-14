@@ -454,11 +454,30 @@ class OpenAIServerModel(Model):
                 "Please install 'openai' extra to use OpenAIServerModel: `pip install 'smolagents[openai]'`"
             ) from None
 
+        import os
+        is_placeholder = lambda k: not k or k.strip() == "" or k.startswith("your_")
+        
+        resolved_key = api_key
+        resolved_base = api_base
+        
+        if is_placeholder(resolved_key):
+            env_openai_key = os.getenv("OPENAI_API_KEY")
+            if not is_placeholder(env_openai_key):
+                resolved_key = env_openai_key
+            else:
+                deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+                if not is_placeholder(deepseek_key):
+                    resolved_key = deepseek_key
+                    if is_placeholder(resolved_base) or "api.openai.com" in (resolved_base or ""):
+                        resolved_base = "https://api.deepseek.com/v1"
+                    if model_id.startswith("gpt-"):
+                        model_id = "deepseek-chat"
+
         super().__init__(**kwargs)
         self.model_id = model_id
         self.client = openai.OpenAI(
-            base_url=api_base,
-            api_key=api_key,
+            base_url=resolved_base,
+            api_key=resolved_key,
             organization=organization,
             project=project,
         )
