@@ -401,6 +401,7 @@ def cmd_auto_evolve(args):
     print(f"Creativity index: {args.creativity}")
     print(f"Use Pareto selection: {args.use_pareto_selection}")
     print(f"Clear storage per round: {args.clear_storage_per_round}")
+    print(f"Metric level: {args.metric_level}")
     
     # Get model IDs
     analysis_model_id = args.model or os.getenv("ANALYSIS_MODEL", os.getenv("DEFAULT_MODEL", "gpt-5"))
@@ -424,6 +425,7 @@ def cmd_auto_evolve(args):
         datasets_config=DEFAULT_DATASETS,
         use_pareto_selection=args.use_pareto_selection,
         clear_storage_per_round=args.clear_storage_per_round,
+        metric_level=args.metric_level,
     )
     
     # Confirm before starting
@@ -692,6 +694,13 @@ def main():
         dest="clear_storage_per_round",
         action="store_false",
         help="Disable storage clearing (providers keep knowledge from previous rounds)"
+    )
+    p_auto.add_argument(
+        "--metric-level",
+        type=str,
+        choices=["core", "enhanced", "complete"],
+        default="core",
+        help="Evaluation metric complexity level for Pareto selection (default: core)"
     )
     p_auto.add_argument(
         "-y", "--yes",

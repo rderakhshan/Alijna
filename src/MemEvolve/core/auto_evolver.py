@@ -66,6 +66,7 @@ class AutoEvolver:
         max_workers: int = 3,
         use_pareto_selection: bool = False,
         clear_storage_per_round: bool = True,
+        metric_level: str = "core",
     ):
         if analysis_model_id is None:
             analysis_model_id = os.getenv("ANALYSIS_MODEL", os.getenv("DEFAULT_MODEL", "gpt-5"))
@@ -99,6 +100,7 @@ class AutoEvolver:
         self.max_workers = max_workers
         self.use_pareto_selection = use_pareto_selection
         self.clear_storage_per_round = clear_storage_per_round
+        self.metric_level = metric_level
         self.state = self._load_state()
 
     def _state_file(self) -> Path:
@@ -620,18 +622,59 @@ class AutoEvolver:
         """
         Select top k memory systems using Pareto optimality-based sorting.
         
-        Multi-objective optimization:
-        - Primary objective: Task success rate (accuracy, higher is better)
-        - Secondary objectives: Computational cost (total_tokens, lower is better), 
-          execution time (elapsed_time, lower is better)
-        - Reliability: step_success_rate (higher is better)
-        
-        Steps:
-        1. Extract multi-dimensional metric vectors for each architecture
-        2. Assign Pareto ranks (non-dominated sorting)
-        3. For architectures with the same rank, use scalarized score (weighted composite score) to break ties
-        4. Select Top-K architectures
+        Multi-objective optimization dynamically configured based on self.metric_level.
         """
+        # Define objectives and optimization directions
+        if self.metric_level == "core":
+            objectives = {
+                "accuracy": {"higher_better": True},
+                "total_tokens": {"higher_better": False},
+                "execution_time": {"higher_better": False},
+            }
+        elif self.metric_level == "enhanced":
+            objectives = {
+                "accuracy": {"higher_better": True},
+                "total_tokens": {"higher_better": False},
+                "execution_time": {"higher_better": False},
+                "step_success_rate": {"higher_better": True},
+                "tool_invocation_accuracy": {"higher_better": True},
+                "execution_correctness": {"higher_better": True},
+                "token_efficiency": {"higher_better": True},
+                "retrieval_ndcg": {"higher_better": True},
+                "context_decay": {"higher_better": False},
+                "progress_rate": {"higher_better": True},
+                "factual_recall": {"higher_better": True},
+                "policy_adherence": {"higher_better": True},
+                "error_recovery": {"higher_better": True},
+            }
+        elif self.metric_level == "complete":
+            objectives = {
+                "accuracy": {"higher_better": True},
+                "total_tokens": {"higher_better": False},
+                "execution_time": {"higher_better": False},
+                "step_success_rate": {"higher_better": True},
+                "tool_invocation_accuracy": {"higher_better": True},
+                "execution_correctness": {"higher_better": True},
+                "token_efficiency": {"higher_better": True},
+                "retrieval_ndcg": {"higher_better": True},
+                "context_decay": {"higher_better": False},
+                "progress_rate": {"higher_better": True},
+                "factual_recall": {"higher_better": True},
+                "policy_adherence": {"higher_better": True},
+                "error_recovery": {"higher_better": True},
+                "factual_correctness": {"higher_better": True},
+                "reasoning_alignment": {"higher_better": True},
+                "contradiction_rate": {"higher_better": False},
+                "toxicity": {"higher_better": False},
+                "explainability": {"higher_better": True},
+            }
+        else:
+            objectives = {
+                "accuracy": {"higher_better": True},
+                "total_tokens": {"higher_better": False},
+                "execution_time": {"higher_better": False},
+            }
+
         # Extract multi-dimensional metrics
         candidates = []
         for provider, res in eval_results.items():
@@ -639,21 +682,22 @@ class AutoEvolver:
                 continue
             summary = res.get("summary", {})
             
-            # Extract metrics (for minimization objectives, we keep original values)
-            accuracy = summary.get("accuracy", 0.0)  # Higher is better
-            total_tokens = summary.get("tokens", {}).get("total_tokens", 999999)
-            step_success = summary.get("step_success_rate", 0.0)  # Higher is better
-            
-            # Calculate average execution time from per_task data or original log files
-            avg_execution_time = self._compute_avg_execution_time(res)
-            
-            candidates.append({
-                "provider": provider,
-                "accuracy": accuracy,  # Higher is better
-                "total_tokens": total_tokens,  # Lower is better
-                "execution_time": avg_execution_time,  # Lower is better
-                "step_success_rate": step_success,  # Higher is better
-            })
+            candidate_metrics = {"provider": provider}
+            for obj_key, obj_meta in objectives.items():
+                if obj_key == "total_tokens":
+                    val = summary.get("tokens", {}).get("total_tokens", 999999)
+                elif obj_key == "execution_time":
+                    val = self._compute_avg_execution_time(res)
+                else:
+                    val = summary.get(obj_key)
+                    if val is None:
+                        # Fallback default values
+                        if obj_key == "context_decay" or obj_key == "contradiction_rate" or obj_key == "toxicity":
+                            val = 0.0
+                        else:
+                            val = 1.0 if obj_meta["higher_better"] else 0.0
+                candidate_metrics[obj_key] = float(val)
+            candidates.append(candidate_metrics)
         
         if not candidates:
             return []
@@ -662,27 +706,22 @@ class AutoEvolver:
         def dominates(candidate1: Dict, candidate2: Dict) -> bool:
             """
             Determine if candidate1 dominates candidate2.
-            Dominance relationship: candidate1 is no worse than candidate2 on all objectives,
-            and strictly better on at least one objective.
             """
-            acc1, tok1, time1, step1 = (
-                candidate1["accuracy"], candidate1["total_tokens"],
-                candidate1["execution_time"], candidate1["step_success_rate"],
-            )
-            acc2, tok2, time2, step2 = (
-                candidate2["accuracy"], candidate2["total_tokens"],
-                candidate2["execution_time"], candidate2["step_success_rate"],
-            )
-            
-            # candidate1 is no worse than candidate2 on all objectives
-            not_worse = (
-                acc1 >= acc2 and tok1 <= tok2 and time1 <= time2 and step1 >= step2
-            )
-            # candidate1 is strictly better than candidate2 on at least one objective
-            strictly_better = (
-                acc1 > acc2 or tok1 < tok2 or time1 < time2 or step1 > step2
-            )
-            
+            not_worse = True
+            strictly_better = False
+            for obj_key, obj_meta in objectives.items():
+                v1 = candidate1[obj_key]
+                v2 = candidate2[obj_key]
+                if obj_meta["higher_better"]:
+                    if v1 < v2:
+                        not_worse = False
+                    if v1 > v2:
+                        strictly_better = True
+                else:
+                    if v1 > v2:
+                        not_worse = False
+                    if v1 < v2:
+                        strictly_better = True
             return not_worse and strictly_better
         
         # Assign Pareto ranks
@@ -691,7 +730,6 @@ class AutoEvolver:
         current_rank = 1
         
         while remaining:
-            # Find current rank's Pareto front (candidates not dominated by any other candidate)
             front = []
             for c1 in remaining:
                 is_dominated = False
@@ -702,7 +740,6 @@ class AutoEvolver:
                 if not is_dominated:
                     front.append(c1)
             
-            # Assign rank to candidates in the front
             for c in front:
                 pareto_ranks[c["provider"]] = current_rank
                 remaining.remove(c)
@@ -713,45 +750,31 @@ class AutoEvolver:
         def compute_scalarized_score(candidate: Dict) -> float:
             """
             Compute weighted composite score for breaking ties.
-            Weight settings:
-            - accuracy: 0.6 (primary objective)
-            - token efficiency: 0.25 (cost)
-            - execution time efficiency: 0.15 (latency)
             """
+            score = 0.0
             accuracy = candidate["accuracy"]
-            tokens = candidate["total_tokens"]
-            execution_time = candidate["execution_time"]
-            step_success = candidate["step_success_rate"]
+            score += 0.5 * accuracy
             
-            # Get max and min values for all candidates for min-max normalization
-            all_tokens = [c["total_tokens"] for c in candidates]
-            all_times = [c["execution_time"] for c in candidates]
-            all_steps = [c["step_success_rate"] for c in candidates]
-            min_tokens = min(all_tokens) if all_tokens else 0
-            max_tokens = max(all_tokens) if all_tokens else 1
-            min_time = min(all_times) if all_times else 0
-            max_time = max(all_times) if all_times else 1
-            
-            # Min-max normalization: for "lower is better" objectives, normalize and invert
-            # token_score: tokens lower is better, normalize to [0,1], lower values get higher scores
-            if max_tokens > min_tokens:
-                token_normalized = (max_tokens - tokens) / (max_tokens - min_tokens)
-            else:
-                token_normalized = 1.0
-            token_score = token_normalized
-            
-            # time_score: execution time lower is better
-            if max_time > min_time:
-                time_normalized = (max_time - execution_time) / (max_time - min_time)
-            else:
-                time_normalized = 1.0
-            time_score = time_normalized
-            
-            # step_score: step_success_rate higher is better (already in [0,1])
-            step_score = step_success
-            
-            # Weighted composite score
-            score = 0.5 * accuracy + 0.20 * token_score + 0.15 * time_score + 0.15 * step_score
+            other_keys = [k for k in objectives.keys() if k != "accuracy"]
+            if not other_keys:
+                return score
+                
+            weight_per_metric = 0.5 / len(other_keys)
+            for key in other_keys:
+                val = candidate[key]
+                all_vals = [c[key] for c in candidates]
+                min_val = min(all_vals)
+                max_val = max(all_vals)
+                
+                if max_val > min_val:
+                    normalized = (val - min_val) / (max_val - min_val)
+                else:
+                    normalized = 1.0
+                    
+                if not objectives[key]["higher_better"]:
+                    normalized = 1.0 - normalized
+                    
+                score += weight_per_metric * normalized
             return score
         
         # Sort by rank and composite score
@@ -765,10 +788,7 @@ class AutoEvolver:
                 "scalarized_score": score,
             })
         
-        # Sort: first by Pareto rank (lower is better), then by composite score (higher is better)
         ranked_candidates.sort(key=lambda x: (x["pareto_rank"], -x["scalarized_score"]))
-        
-        # Select Top-K
         selected = [c["provider"] for c in ranked_candidates[:k]]
         return selected
 

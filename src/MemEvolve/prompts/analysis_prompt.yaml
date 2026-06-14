@@ -31,6 +31,18 @@ prompt_template: |
 
   ---
 
+  ## Structured Metrics & Evaluation Diagnostics
+
+  ### Evaluation Metrics Summary
+  {metrics_summary}
+
+  ### Weakest Performance Dimensions
+  {weakest_dimensions}
+
+  Please pay special attention to the weakest performance dimensions listed above when forming your recommendations.
+
+  ---
+
   ## System Boundaries
 
   The agent architecture contains fixed components:

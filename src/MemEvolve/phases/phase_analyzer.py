@@ -326,12 +326,64 @@ Below is an example provider for reference. You should implement your own innova
         if not template:
             raise ValueError(f"Failed to load analysis prompt template from prompts/analysis_prompt.yaml")
         
+        # Calculate evaluation metrics
+        try:
+            from MemEvolve.utils.trajectory_tools import TrajectoryFeedbackAggregator
+            aggregator = TrajectoryFeedbackAggregator(task_logs_dir, model=self.base_model)
+            agg_results = aggregator.aggregate()
+            summary = agg_results.get("summary", {})
+        except Exception as e:
+            print(f"  Warning: Failed to run TrajectoryFeedbackAggregator: {e}")
+            summary = {}
+
+        # Format metrics summary
+        metrics_summary_list = []
+        for key, val in summary.items():
+            if isinstance(val, (int, float)):
+                metrics_summary_list.append(f"  - {key}: {val:.3f}")
+            elif isinstance(val, dict):
+                metrics_summary_list.append(f"  - {key}:")
+                for sub_key, sub_val in val.items():
+                    if isinstance(sub_val, (int, float)):
+                        metrics_summary_list.append(f"    - {sub_key}: {sub_val:.3f}")
+                    else:
+                        metrics_summary_list.append(f"    - {sub_key}: {sub_val}")
+            else:
+                metrics_summary_list.append(f"  - {key}: {val}")
+        metrics_summary = "\n".join(metrics_summary_list) if metrics_summary_list else "  (No structured metrics available)"
+
+        # Determine weakest dimensions
+        weakest = []
+        thresholds = {
+            "accuracy": (0.8, "Task success rate is low. Memories are not successfully helping the agent retrieve correct facts/answers."),
+            "step_success_rate": (0.8, "Agent steps are encountering errors. Retrieved memory context might be formatting incorrectly or confusing the agent."),
+            "tool_invocation_accuracy": (0.9, "The agent is executing action steps but not calling any tools."),
+            "execution_correctness": (0.85, "Tool executions are raising exceptions. Agent might be calling tools with wrong arguments."),
+            "parameter_f1": (0.8, "Generated tool arguments do not match expected templates."),
+            "retrieval_ndcg": (0.8, "The agent is selecting the wrong tools."),
+            "context_decay": (0.7, "Context span decay is high. The context window is filling up too fast."),
+            "policy_adherence": (0.9, "The agent is violating custom task policies or constraints."),
+            "error_recovery": (0.5, "The agent fails to recover when error feedback is returned from tools."),
+            "factual_correctness": (0.85, "High rate of factual hallucinations."),
+            "contradiction_rate": (0.2, "High contradiction rate between agent reasoning steps."),
+            "toxicity": (0.1, "High toxicity rate in agent outputs."),
+        }
+        for key, (thresh, msg) in thresholds.items():
+            val = summary.get(key)
+            if val is not None:
+                is_weak = val < thresh if key not in ["contradiction_rate", "toxicity", "context_decay"] else val > thresh
+                if is_weak:
+                    weakest.append(f"  - {key} (Current value: {val:.3f}, target threshold: {thresh}): {msg}")
+        weakest_dimensions = "\n".join(weakest) if weakest else "  No significant weaknesses detected. The current system is well-optimized."
+
         # Use template from YAML file
         prompt = template.format(
             default_provider=default_provider,
             memory_files_info=memory_files_info,
             provider_template=provider_template,
             total_tasks=stats['total_tasks'],
-            overview=overview
+            overview=overview,
+            metrics_summary=metrics_summary,
+            weakest_dimensions=weakest_dimensions
         )
         return prompt
