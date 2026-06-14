@@ -163,6 +163,41 @@ class TrajectoryFeedbackAggregator:
         except SyntaxError:
             return 0.0
 
+    def _calculate_parameter_f1(self, trajectory: List[Dict[str, Any]], expected_args: Optional[Dict[str, Any]] = None) -> float:
+        """Calculate F1 score for generated vs expected tool parameters."""
+        if expected_args is None:
+            return 1.0
+        
+        generated_args = {}
+        for step in trajectory:
+            if step.get("name") == "action":
+                for call in (step.get("tool_calls") or []):
+                    args = call.get("args") or call.get("arguments") or call.get("input")
+                    if isinstance(args, dict):
+                        generated_args.update(args)
+                    elif isinstance(args, str):
+                        try:
+                            generated_args.update(json.loads(args))
+                        except Exception:
+                            pass
+                            
+        if not expected_args:
+            return 1.0 if not generated_args else 0.0
+            
+        tp = sum(1 for k, v in generated_args.items() if k in expected_args and expected_args[k] == v)
+        fp = len(generated_args) - tp
+        fn = len(expected_args) - tp
+        if tp == 0:
+            return 0.0
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        return 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    def _calculate_memory_span(self, data: dict) -> float:
+        """Calculate memory span based on length of agent trajectory."""
+        trajectory = data.get("agent_trajectory", [])
+        return float(len(trajectory))
+
     def compute_feedback(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         trajectory: List[Dict[str, Any]] = task_data.get("agent_trajectory", [])
         is_correct = self._is_task_correct(task_data)
@@ -196,6 +231,24 @@ class TrajectoryFeedbackAggregator:
         exec_correctness = self._execution_correctness(trajectory)
         prompt_leak = self._detect_prompt_leak(str(task_data.get("agent_result", "")))
 
+        # AST validation
+        import re
+        agent_result = str(task_data.get("agent_result", ""))
+        code_blocks = re.findall(r"```python\s*(.*?)\s*```", agent_result, re.DOTALL)
+        if not code_blocks:
+            code_blocks = re.findall(r"```\s*(.*?)\s*```", agent_result, re.DOTALL)
+        ast_val = 1.0
+        if code_blocks:
+            ast_val = min(self._validate_ast(block) for block in code_blocks)
+        elif "def " in agent_result or "import " in agent_result:
+            ast_val = self._validate_ast(agent_result)
+
+        # Parameter F1
+        param_f1 = self._calculate_parameter_f1(trajectory, task_data.get("expected_args"))
+
+        # Memory span
+        mem_span = self._calculate_memory_span(task_data)
+
         feedback = {
             "accuracy": 1 if is_correct else 0,
             "status": task_data.get("status", "unknown"),
@@ -204,7 +257,9 @@ class TrajectoryFeedbackAggregator:
             "tool_invocation_accuracy": tool_invocation_acc,
             "execution_correctness": exec_correctness,
             "prompt_leak": prompt_leak,
-            "memory_span": steps_total,
+            "ast_validation": ast_val,
+            "parameter_f1": param_f1,
+            "memory_span": mem_span,
             "steps": {
                 "total": steps_total,
                 "action": action_steps,
@@ -275,6 +330,8 @@ class TrajectoryFeedbackAggregator:
             "execution_correctness": _avg(["execution_correctness"]),
             "prompt_leak": _avg(["prompt_leak"]),
             "memory_span": _avg(["memory_span"]),
+            "ast_validation": _avg(["ast_validation"]),
+            "parameter_f1": _avg(["parameter_f1"]),
             "steps": {
                 "total": _avg(["steps", "total"]),
                 "action": _avg(["steps", "action"]),

@@ -48,8 +48,9 @@ class BaseAgent:
                 trajectory.append(traj)
             elif isinstance(step, ActionStep):
                 safe_tool_calls = step.tool_calls if step.tool_calls is not None else []
+                status = "failed" if "error" in (step.observations or "").lower() else "success"
                 traj = {"name": "action", "tool_calls": [st.dict() for st in safe_tool_calls], "obs": step.observations,
-                        "think": step.action_think, "cot_think": step.action_reasoning}
+                        "think": step.action_think, "cot_think": step.action_reasoning, "status": status}
                 trajectory.append(traj)
             else:
                 raise ValueError("[capture_trajectory] Unknown Step:", step)
