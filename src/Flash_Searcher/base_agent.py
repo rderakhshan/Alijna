@@ -49,14 +49,17 @@ class BaseAgent:
             elif isinstance(step, ActionStep):
                 safe_tool_calls = step.tool_calls if step.tool_calls is not None else []
                 status = "failed" if "error" in (step.observations or "").lower() else "success"
+                available = list(self.agent_fn.tools.keys()) if hasattr(self.agent_fn, "tools") else []
                 traj = {"name": "action", "tool_calls": [st.dict() for st in safe_tool_calls], "obs": step.observations,
-                        "think": step.action_think, "cot_think": step.action_reasoning, "status": status}
+                        "think": step.action_think, "cot_think": step.action_reasoning, "status": status,
+                        "available_tools": available}
                 trajectory.append(traj)
             else:
                 raise ValueError("[capture_trajectory] Unknown Step:", step)
 
         return {
             "agent_trajectory": trajectory,
+            "context_token_history": getattr(self.agent_fn, "context_token_history", []),
         }
 
     def forward(self, task, answer=None, return_json=False, max_retries=3):

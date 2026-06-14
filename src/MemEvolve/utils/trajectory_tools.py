@@ -198,6 +198,62 @@ class TrajectoryFeedbackAggregator:
         trajectory = data.get("agent_trajectory", [])
         return float(len(trajectory))
 
+    def _calculate_token_efficiency(self, data: dict) -> float:
+        """Calculate token cost efficiency (tokens per second)."""
+        metrics = data.get("metrics", {})
+        tokens = metrics.get("total_tokens", 0)
+        time_sec = metrics.get("elapsed_time", 1)
+        return tokens / max(time_sec, 0.001)
+
+    def _calculate_retrieval_ndcg(self, retrieved: List[str], selected: str) -> float:
+        """Calculate tool selection accuracy (NDCG)."""
+        import math
+        if not retrieved:
+            return 0.0
+        if retrieved[0] == selected:
+            return 1.0
+        try:
+            idx = retrieved.index(selected)
+            return 1.0 / math.log2(idx + 2)
+        except ValueError:
+            return 0.0
+
+    def _calculate_context_decay(self, data: dict) -> float:
+        """Calculate context span decay."""
+        history = data.get("metrics", {}).get("context_token_history", [])
+        if not history:
+            return 0.0
+        avg_tokens = sum(history) / len(history)
+        return float(history[-1] / avg_tokens) if avg_tokens > 0 else 0.0
+
+    def _calculate_progress_rate(self, data: dict) -> float:
+        """Calculate subgoal progress rate."""
+        metrics = data.get("metrics", {})
+        total = metrics.get("goals_total", 1)
+        completed = metrics.get("goals_completed", 0)
+        return min(completed / total, 1.0)
+
+    def _calculate_factual_recall(self, actual: list, expected: list) -> float:
+        """Calculate factual recall accuracy."""
+        if not expected:
+            return 1.0
+        recalled = sum(1 for item in actual if item in expected)
+        return recalled / len(expected)
+
+    def _calculate_policy_adherence(self, answer: str, policy_rules: list) -> float:
+        """Calculate policy adherence score."""
+        if not policy_rules:
+            return 1.0
+        passed = sum(1 for rule in policy_rules if rule.lower() in answer.lower())
+        return passed / len(policy_rules)
+
+    def _calculate_error_recovery(self, data: dict) -> float:
+        """Calculate error recovery rate."""
+        metrics = data.get("metrics", {})
+        injected = metrics.get("errors_injected", 0)
+        recovered = metrics.get("errors_recovered", 0)
+        return recovered / injected if injected > 0 else 1.0
+
     def compute_feedback(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         trajectory: List[Dict[str, Any]] = task_data.get("agent_trajectory", [])
         is_correct = self._is_task_correct(task_data)
@@ -249,6 +305,40 @@ class TrajectoryFeedbackAggregator:
         # Memory span
         mem_span = self._calculate_memory_span(task_data)
 
+        # Token efficiency
+        token_eff = self._calculate_token_efficiency(task_data)
+
+        # Tool retrieval NDCG
+        selected_tool = None
+        retrieved_tools = []
+        for step in trajectory:
+            if step.get("name") == "action":
+                tool_calls = step.get("tool_calls") or []
+                if tool_calls:
+                    selected_tool = tool_calls[0].get("name") or tool_calls[0].get("tool")
+                    retrieved_tools = step.get("available_tools") or []
+                    break
+        target_tool = task_data.get("target_tool") or selected_tool
+        retrieval_ndcg = self._calculate_retrieval_ndcg(retrieved_tools, target_tool) if target_tool else 1.0
+
+        # Context decay
+        ctx_decay = self._calculate_context_decay(task_data)
+
+        # Progress rate
+        prog_rate = self._calculate_progress_rate(task_data)
+
+        # Factual recall
+        actual_recalls = []
+        for step in trajectory:
+            actual_recalls.extend(self._memory_guidance_items(step))
+        fact_recall = self._calculate_factual_recall(actual_recalls, task_data.get("expected_recalls"))
+
+        # Policy adherence
+        policy_adh = self._calculate_policy_adherence(agent_result, task_data.get("policy_rules"))
+
+        # Error recovery
+        err_rec = self._calculate_error_recovery(task_data)
+
         feedback = {
             "accuracy": 1 if is_correct else 0,
             "status": task_data.get("status", "unknown"),
@@ -260,6 +350,13 @@ class TrajectoryFeedbackAggregator:
             "ast_validation": ast_val,
             "parameter_f1": param_f1,
             "memory_span": mem_span,
+            "token_efficiency": token_eff,
+            "retrieval_ndcg": retrieval_ndcg,
+            "context_decay": ctx_decay,
+            "progress_rate": prog_rate,
+            "factual_recall": fact_recall,
+            "policy_adherence": policy_adh,
+            "error_recovery": err_rec,
             "steps": {
                 "total": steps_total,
                 "action": action_steps,
@@ -332,6 +429,13 @@ class TrajectoryFeedbackAggregator:
             "memory_span": _avg(["memory_span"]),
             "ast_validation": _avg(["ast_validation"]),
             "parameter_f1": _avg(["parameter_f1"]),
+            "token_efficiency": _avg(["token_efficiency"]),
+            "retrieval_ndcg": _avg(["retrieval_ndcg"]),
+            "context_decay": _avg(["context_decay"]),
+            "progress_rate": _avg(["progress_rate"]),
+            "factual_recall": _avg(["factual_recall"]),
+            "policy_adherence": _avg(["policy_adherence"]),
+            "error_recovery": _avg(["error_recovery"]),
             "steps": {
                 "total": _avg(["steps", "total"]),
                 "action": _avg(["steps", "action"]),

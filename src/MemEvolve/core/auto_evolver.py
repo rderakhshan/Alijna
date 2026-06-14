@@ -772,6 +772,17 @@ class AutoEvolver:
         selected = [c["provider"] for c in ranked_candidates[:k]]
         return selected
 
+    def _calculate_pass_at_k(self, n: int, c: int, k: int) -> float:
+        import math
+        if n - c < k:
+            return 1.0
+        return 1.0 - (math.comb(n - c, k) / math.comb(n, k))
+
+    def _calculate_pass_strict_k(self, run_successes: List[bool], k: int) -> float:
+        if len(run_successes) < k:
+            return 0.0
+        return 1.0 if all(run_successes[:k]) else 0.0
+
     def _select_top(self, eval_results: Dict[str, Any], k: int) -> List[str]:
         """
         Select top k memory systems.

@@ -71,6 +71,7 @@ def process_item(item, model, summary_interval, prompts_type, max_steps, memory_
             "total_tokens": token_counts["total_tokens"],
             "prompt_tokens": token_counts["input_token_count"],
             "completion_tokens": token_counts["output_token_count"],
+            "context_token_history": result.get("context_token_history", []),
         },
     }
 
